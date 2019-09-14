@@ -9,6 +9,8 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using System.Xml;
 using System.Net.Http;
+using Microsoft.Azure.Cosmos;
+using System.Linq;
 
 namespace DependancyGraph
 {
@@ -16,13 +18,17 @@ namespace DependancyGraph
     {
         [FunctionName("Function1")]
         public static async Task<IActionResult> Run(
-            [HttpTrigger(AuthorizationLevel.Function,"get", "post", Route = null)] HttpRequest req,
+            [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
             ILogger log)
         {
             log.LogInformation("C# HTTP trigger function processed a request.");
 
             string name = req.Query["name"];
             string version = req.Query["version"];
+
+            string connectionString = Environment.GetEnvironmentVariable("cosmosDatabase");
+            string databaseId = Environment.GetEnvironmentVariable("databaseId");
+            string containerId = Environment.GetEnvironmentVariable("containerId");
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
@@ -39,18 +45,58 @@ namespace DependancyGraph
 
                 xml.Load(result.Result);
 
-                var ns = xml.GetNamespaceOfPrefix("d");
+                var dns = xml.GetNamespaceOfPrefix("d");
+                var mns = xml.GetNamespaceOfPrefix("m");
 
-                var depends = xml.GetElementsByTagName("Dependencies", ns);
+                var properties = xml.GetElementsByTagName("m:properties");
+
+                var packageName = xml.GetElementsByTagName("d:Id");
+
+                var pacakgeVersion = xml.GetElementsByTagName("d:Version");
+
+                var packageLicense = xml.GetElementsByTagName("d:LicenseUrl");
+
+                var depends = xml.GetElementsByTagName("d:Dependencies");
 
                 log.LogInformation(depends.Count.ToString());
 
+
+                var package = new Package()
+                {
+                    id = Guid.NewGuid().ToString(),
+                    Name = packageName.Item(0).InnerText,
+                    Versions = new PackageVersion[]
+                    {
+                        new PackageVersion()
+                        {
+                            Id = Guid.NewGuid().ToString(),
+                            Version = pacakgeVersion.Item(0).InnerText,
+                            Dependancies = null,
+                            License = new License()
+                            {
+                                Id = Guid.NewGuid().ToString(),
+                                uri = packageLicense.Item(0).InnerText,
+                                LicenseType = new LicenseType()
+                                {
+                                    Id = Guid.NewGuid().ToString(),
+                                    Name = "UNKNOWN"
+                                }
+                            }
+                        }
+                    }
+                };
+
+                var cosmosClient = new CosmosClient(connectionString);
+
+                var database = cosmosClient.CreateDatabaseIfNotExistsAsync(databaseId).Result.Database;
+
+                var container = database.CreateContainerIfNotExistsAsync(containerId, "/Name").Result.Container;
+
+
+                var saved = container.UpsertItemAsync<Package>(package, new PartitionKey(package.Name)).Result;
+
+                return new OkObjectResult(saved);
             }
-
-
-            return name != null
-                ? (ActionResult)new OkObjectResult($"Hello, {name}")
-                : new BadRequestObjectResult("Please pass a name on the query string or in the request body");
-        x`}
+        }
     }
 }
