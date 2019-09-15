@@ -78,7 +78,7 @@ namespace DependancyGraph
 
                 var package = new Package()
                 {
-                    id = $"{packageName}:{packageVersion}",
+                    Id = $"{packageName}:{packageVersion}",
                     Name = packageName,
                     Version = packageVersion,
                     LicenseUrl = packageLicense,

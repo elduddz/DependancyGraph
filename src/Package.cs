@@ -8,7 +8,7 @@ namespace DependancyGraph
     public class Package
     {
         [JsonProperty(PropertyName = "id")]
-        public string id { get; set; }
+        public string Id { get; set; }
         public string Name { get; set; }
         public string Version { get; set; }
         public string LicenseUrl { get; set; }
