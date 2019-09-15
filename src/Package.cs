@@ -12,6 +12,8 @@ namespace DependancyGraph
         public string Name { get; set; }
         public string Version { get; set; }
         public string LicenseUrl { get; set; }
+        public string PackageUrl { get; set; }
+
         public override string ToString()
         {
             return JsonConvert.SerializeObject(this);
