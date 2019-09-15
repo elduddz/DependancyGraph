@@ -131,17 +131,6 @@ namespace DependancyGraph
             }
         }
 
-        private static Container CosmosConnection()
-        {
-            string databaseId, containerId;
-            string primaryConnectionString = Environment.GetEnvironmentVariable("primaryConnectionString");
-            databaseId = Environment.GetEnvironmentVariable("databaseId");
-            containerId = Environment.GetEnvironmentVariable("containerId");
-
-            var cosmosClient = new CosmosClient(primaryConnectionString);
-            return cosmosClient.GetContainer(databaseId, containerId);
-        }
-
         private static GremlinClient GraphConnection()
         {
             string connectionString, password, databaseId, containerId;
