@@ -10,7 +10,8 @@ namespace DependancyGraph
         [JsonProperty(PropertyName = "id")]
         public string id { get; set; }
         public string Name { get; set; }
-        public PackageVersion[] Versions { get; set; }
+        public string Version { get; set; }
+        public string LicenseUrl { get; set; }
         public override string ToString()
         {
             return JsonConvert.SerializeObject(this);

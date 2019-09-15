@@ -11,6 +11,19 @@ using System.Xml;
 using System.Net.Http;
 using Microsoft.Azure.Cosmos;
 using System.Linq;
+using Gremlin.Net.Driver;
+using Gremlin.Net.Driver.Remote;
+using static Gremlin.Net.Process.Traversal.AnonymousTraversalSource;
+using static Gremlin.Net.Process.Traversal.__;
+using static Gremlin.Net.Process.Traversal.P;
+using static Gremlin.Net.Process.Traversal.Order;
+using static Gremlin.Net.Process.Traversal.Operator;
+using static Gremlin.Net.Process.Traversal.Pop;
+using static Gremlin.Net.Process.Traversal.Scope;
+using static Gremlin.Net.Process.Traversal.TextP;
+using static Gremlin.Net.Process.Traversal.Column;
+using static Gremlin.Net.Process.Traversal.Direction;
+using static Gremlin.Net.Process.Traversal.T;
 
 namespace DependancyGraph
 {
@@ -26,7 +39,9 @@ namespace DependancyGraph
             string name = req.Query["name"];
             string version = req.Query["version"];
 
-            string connectionString = Environment.GetEnvironmentVariable("cosmosDatabase");
+            string connectionString = Environment.GetEnvironmentVariable("connectionString");
+            string primaryConnectionString = Environment.GetEnvironmentVariable("primaryConnectionString");
+            string password = Environment.GetEnvironmentVariable("key");
             string databaseId = Environment.GetEnvironmentVariable("databaseId");
             string containerId = Environment.GetEnvironmentVariable("containerId");
 
@@ -50,11 +65,11 @@ namespace DependancyGraph
 
                 var properties = xml.GetElementsByTagName("m:properties");
 
-                var packageName = xml.GetElementsByTagName("d:Id");
+                var packageName = xml.GetElementsByTagName("d:Id")[0].InnerText;
 
-                var pacakgeVersion = xml.GetElementsByTagName("d:Version");
+                var packageVersion = xml.GetElementsByTagName("d:Version")[0].InnerText;
 
-                var packageLicense = xml.GetElementsByTagName("d:LicenseUrl");
+                var packageLicense = xml.GetElementsByTagName("d:LicenseUrl")[0].InnerText;
 
                 var depends = xml.GetElementsByTagName("d:Dependencies");
 
@@ -63,39 +78,26 @@ namespace DependancyGraph
 
                 var package = new Package()
                 {
-                    id = Guid.NewGuid().ToString(),
-                    Name = packageName.Item(0).InnerText,
-                    Versions = new PackageVersion[]
-                    {
-                        new PackageVersion()
-                        {
-                            Id = Guid.NewGuid().ToString(),
-                            Version = pacakgeVersion.Item(0).InnerText,
-                            Dependancies = null,
-                            License = new License()
-                            {
-                                Id = Guid.NewGuid().ToString(),
-                                uri = packageLicense.Item(0).InnerText,
-                                LicenseType = new LicenseType()
-                                {
-                                    Id = Guid.NewGuid().ToString(),
-                                    Name = "UNKNOWN"
-                                }
-                            }
-                        }
-                    }
+                    id = $"{packageName}:{packageVersion}",
+                    Name = packageName,
+                    Version = packageVersion,
+                    LicenseUrl = packageLicense,
                 };
 
-                var cosmosClient = new CosmosClient(connectionString);
-
-                var database = cosmosClient.CreateDatabaseIfNotExistsAsync(databaseId).Result.Database;
-
-                var container = database.CreateContainerIfNotExistsAsync(containerId, "/Name").Result.Container;
+                var cosmosClient = new CosmosClient(primaryConnectionString);
+                var container = cosmosClient.GetContainer(databaseId, containerId);
+                var itemResponse = container.UpsertItemAsync<Package>(package).Result;
 
 
-                var saved = container.UpsertItemAsync<Package>(package, new PartitionKey(package.Name)).Result;
+                var gremlinServer = new GremlinServer(connectionString, 443, true, $"/dbs/{databaseId}/colls/{containerId}", password);
 
-                return new OkObjectResult(saved);
+                var gremlinClient = new GremlinClient(gremlinServer);
+
+                var remoteConnection = new DriverRemoteConnection(gremlinClient);
+
+                var g = Traversal().WithRemote(remoteConnection);
+
+                return new OkObjectResult(itemResponse);
             }
         }
     }
