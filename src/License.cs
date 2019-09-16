@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 
-namespace DependancyGraph
+namespace DependencyGraph
 {
     public class License
     {

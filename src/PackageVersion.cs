@@ -1,6 +1,6 @@
 ﻿using Newtonsoft.Json;
 
-namespace DependancyGraph
+namespace DependencyGraph
 {
     public class PackageVersion
     {
@@ -8,7 +8,7 @@ namespace DependancyGraph
         public string Id { get; set; }
         public string Version { get; set; }
 
-        public Package[] Dependancies { get; set; }
+        public Package[] Dependencies { get; set; }
 
         public License License { get; set; }
         public override string ToString()
