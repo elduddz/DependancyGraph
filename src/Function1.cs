@@ -11,8 +11,11 @@ using System.Xml;
 using System.Net.Http;
 using Microsoft.Azure.Cosmos;
 using System.Linq;
+using Gremlin.Net.CosmosDb;
 using Gremlin.Net.Driver;
 using Gremlin.Net.Driver.Remote;
+using Gremlin.Net.Process.Traversal;
+using Gremlin.Net.Structure;
 using static Gremlin.Net.Process.Traversal.AnonymousTraversalSource;
 using static Gremlin.Net.Process.Traversal.__;
 using static Gremlin.Net.Process.Traversal.P;
@@ -104,7 +107,7 @@ namespace DependancyGraph
                             string versionPart = parts[1];
 
                             GetPackage(name: namePart, version: versionPart, frameworkFilter);
-                            AddEdge(parent: $"{packageName}:{packageVersion}", dependant: $"{namePart}:{versionPart}");
+                            AddEdge(parent: $"{packageName}:{packageVersion}", dependent: $"{namePart}:{versionPart}");
                         }
                     }
                 }
@@ -112,12 +115,14 @@ namespace DependancyGraph
             }
         }
 
-        private static void AddEdge(string parent, string dependant)
+        private static void AddEdge(string parent, string dependent)
         {
             using (var gremlinClient = GraphConnection())
             {
-                var result = gremlinClient.SubmitAsync<dynamic>($"g.V('{parent}').AddE('dependsOn').To(g.V('{dependant}'))").Result;
-                _log.LogInformation(result.ToString());
+                var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
+                var command = g.V(parent).AddE("dependsOn").To(dependent);
+                var result = gremlinClient.SubmitAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
+                _log.LogInformation("done");
             }
         }
 
@@ -125,9 +130,16 @@ namespace DependancyGraph
         {
             using (var gremlinClient = GraphConnection())
             {
-                var result = gremlinClient.SubmitAsync<dynamic>($"g.AddV('package').Property('id', '{packageName}:{ packageVersion}').Property('Name','{packageName}').Property('Version','{packageVersion}').Property('License','{packageLicense}').Property('DownloadUrl','{packageUrl}')").Result;
+                var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
+                var command = g.AddV("package")
+                    .Property("id", $"{packageName}:{packageVersion}")
+                    .Property("Name", packageName)
+                    .Property("Version", packageVersion)
+                    .Property("License", packageLicense)
+                    .Property("DownloadUrl", packageUrl);
 
-                _log.LogInformation(result.ToString());
+                var result = gremlinClient.SubmitAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
+                _log.LogInformation("done");
             }
         }
 
