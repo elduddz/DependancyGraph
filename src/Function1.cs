@@ -81,7 +81,7 @@ namespace DependencyGraph
                     l = gremlinClient.SubmitAsync<dynamic>($"g.{g.AddV("license").Property("id", license).Property("Name", license).ToGremlinQuery()}").Result;
                 }
 
-                var command = $"V('{name}:{version}').AddE('licensed').To(g.V('{license}'))";
+                var command = $"V('{name}:{version}').AddE('licensed').To(__.V('{license}'))";
                 var v = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
             }
         }
@@ -153,7 +153,7 @@ namespace DependencyGraph
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
-                var command = $"V('{parent}').AddE('dependsOn').To(g.V('{dependent}'))";
+                var command = $"V('{parent}').AddE('dependsOn').To(__.V('{dependent}'))";
                 var result = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
                 _log.LogInformation("DependsOn done");
             }
