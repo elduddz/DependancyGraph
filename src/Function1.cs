@@ -47,25 +47,49 @@ namespace DependencyGraph
             string name = req.Query["name"];
             string version = req.Query["version"];
             string frameworkFilter = req.Query["framework"];
+            string license = req.Query["license"];
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             dynamic data = JsonConvert.DeserializeObject(requestBody);
             name = name ?? data?.name;
             version = version ?? data?.version;
+            license = license ?? data?.license;
             frameworkFilter = frameworkFilter ?? data?.frameworkFilter;
 
-            if (name == null || version == null || frameworkFilter == null)
+            if (name == null || version == null || frameworkFilter == null || license == null)
             {
                 return new BadRequestObjectResult("Needs more parameters");
             }
 
             GetPackage(name, version, frameworkFilter);
 
+            AssignLicense(name, version, license);
+
             return new OkObjectResult("Complete");
+        }
+
+        private static void AssignLicense(string name, string version, string license)
+        {
+            _log.LogInformation($"Assign License: {name}:{version} - {license}");
+            using (var gremlinClient = GraphConnection())
+            {
+                var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
+                var l = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{g.V().Has("license", "id", license).ToGremlinQuery()}").Result;
+
+                if (l == null)
+                {
+                    l = gremlinClient.SubmitAsync<dynamic>($"g.{g.AddV("license").Property("id", license).Property("Name", license).ToGremlinQuery()}").Result;
+                }
+
+                var command = $"V('{name}:{version}').AddE('licensed').To(g.V('{license}'))";
+                var v = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
+            }
         }
 
         private static void GetPackage(string name, string version, string frameworkFilter)
         {
+            _log.LogInformation($"Get Package: {name}:{version}");
+
             var url = $"https://www.nuget.org/api/v2/Packages(Id='{name}',Version='{version}')";
 
             var xml = new XmlDocument();
@@ -106,8 +130,15 @@ namespace DependencyGraph
                             string namePart = parts[0];
                             string versionPart = parts[1];
 
-                            GetPackage(name: namePart, version: versionPart, frameworkFilter);
-                            AddEdge(parent: $"{packageName}:{packageVersion}", dependent: $"{namePart}:{versionPart}");
+
+                            if (!string.IsNullOrEmpty(namePart))
+                            {
+                                _log.LogInformation($"Getting Dependent {namePart}:{versionPart}");
+
+                                GetPackage(name: namePart, version: versionPart, frameworkFilter);
+                                DependsOn(parent: $"{packageName}:{packageVersion}",
+                                    dependent: $"{namePart}:{versionPart}");
+                            }
                         }
                     }
                 }
@@ -115,31 +146,46 @@ namespace DependencyGraph
             }
         }
 
-        private static void AddEdge(string parent, string dependent)
+        private static void DependsOn(string parent, string dependent)
         {
+            _log.LogInformation($"Add DependsOn: {parent}:{dependent}");
+
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
-                var command = g.V(parent).AddE("dependsOn").To(dependent);
-                var result = gremlinClient.SubmitAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
-                _log.LogInformation("done");
+                var command = $"V('{parent}').AddE('dependsOn').To(g.V('{dependent}'))";
+                var result = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
+                _log.LogInformation("DependsOn done");
             }
         }
 
         private static void StorePackage(string packageName, string packageVersion, string packageLicense, string packageUrl)
         {
+            _log.LogInformation($"Store Package: {packageName}:{packageVersion}");
+
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
-                var command = g.AddV("package")
-                    .Property("id", $"{packageName}:{packageVersion}")
-                    .Property("Name", packageName)
-                    .Property("Version", packageVersion)
-                    .Property("License", packageLicense)
-                    .Property("DownloadUrl", packageUrl);
 
-                var result = gremlinClient.SubmitAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
-                _log.LogInformation("done");
+                var check = g.V().Has("package", "id", $"{packageName}:{packageVersion}");
+
+                var v = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{check.ToGremlinQuery()}").Result;
+
+                if (v == null)
+                {
+                    _log.LogInformation("Package Exists");
+                    var command = g.AddV("package")
+                        .Property("id", $"{packageName}:{packageVersion}")
+                        .Property("Name", packageName)
+                        .Property("Version", packageVersion)
+                        .Property("LicenseUrl", packageLicense)
+                        .Property("DownloadUrl", packageUrl);
+
+                    v = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
+                }
+
+                _log.LogInformation("Store Done");
+
             }
         }
 
