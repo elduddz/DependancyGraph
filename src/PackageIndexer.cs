@@ -31,12 +31,12 @@ using Gremlin.Net.Structure.IO.GraphSON;
 
 namespace DependencyGraph
 {
-    public static class Function1
+    public static class PackageIndexer
     {
         private static Container container;
         private static ILogger _log;
 
-        [FunctionName("Function1")]
+        [FunctionName("PackageIndexer")]
         public static async Task<IActionResult> Run(
             [HttpTrigger(AuthorizationLevel.Function, "get", "post", Route = null)] HttpRequest req,
             ILogger log)
@@ -135,9 +135,8 @@ namespace DependencyGraph
                             {
                                 _log.LogInformation($"Getting Dependent {namePart}:{versionPart}");
 
-                                GetPackage(name: namePart, version: versionPart, frameworkFilter);
-                                DependsOn(parent: $"{packageName}:{packageVersion}",
-                                    dependent: $"{namePart}:{versionPart}");
+                                GetPackage(namePart, versionPart, frameworkFilter);
+                                DependsOn($"{packageName}:{packageVersion}", $"{namePart}:{versionPart}", frameworkPart);
                             }
                         }
                     }
@@ -146,14 +145,14 @@ namespace DependencyGraph
             }
         }
 
-        private static void DependsOn(string parent, string dependent)
+        private static void DependsOn(string parent, string dependent, string framework)
         {
             _log.LogInformation($"Add DependsOn: {parent}:{dependent}");
 
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
-                var command = $"V('{parent}').AddE('dependsOn').To(__.V('{dependent}'))";
+                var command = $"V('{parent}').AddE('dependsOn').Property('Framework','{framework}').To(__.V('{dependent}'))";
                 var result = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
                 _log.LogInformation("DependsOn done");
             }
