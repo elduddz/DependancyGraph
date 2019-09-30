@@ -82,8 +82,13 @@ namespace DependencyGraph
                     l = gremlinClient.SubmitAsync<dynamic>($"g.{g.AddV("license").Property("id", license).Property("Name", license).ToGremlinQuery()}").Result;
                 }
 
+                var lun = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{g.V().Has("license","Name", package.LicenseUrl).ToGremlinQuery()}").Result;
+
                 var command = $"V('{package.Id}').AddE('licensed').To(__.V('{license}'))";
                 var v = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
+
+                command = $"V('{lun["id"]}').AddE('ofType').To(__.V('{license}'))";
+                v = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
             }
         }
 
