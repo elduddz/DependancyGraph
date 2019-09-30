@@ -28,6 +28,7 @@ using static Gremlin.Net.Process.Traversal.Column;
 using static Gremlin.Net.Process.Traversal.Direction;
 using static Gremlin.Net.Process.Traversal.T;
 using Gremlin.Net.Structure.IO.GraphSON;
+using System.Text.RegularExpressions;
 
 namespace DependencyGraph
 {
@@ -61,16 +62,16 @@ namespace DependencyGraph
                 return new BadRequestObjectResult("Needs more parameters");
             }
 
-            GetPackage(name, version, frameworkFilter);
+            var package = GetPackage(name, version, frameworkFilter);
 
-            AssignLicense(name, version, license);
+            AssignLicense(package, license);
 
             return new OkObjectResult("Complete");
         }
 
-        private static void AssignLicense(string name, string version, string license)
+        private static void AssignLicense(Package package, string license)
         {
-            _log.LogInformation($"Assign License: {name}:{version} - {license}");
+            _log.LogInformation($"Assign License: {package.Name}:{package.Version} - {license}");
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
@@ -81,12 +82,12 @@ namespace DependencyGraph
                     l = gremlinClient.SubmitAsync<dynamic>($"g.{g.AddV("license").Property("id", license).Property("Name", license).ToGremlinQuery()}").Result;
                 }
 
-                var command = $"V('{name}:{version}').AddE('licensed').To(__.V('{license}'))";
+                var command = $"V('{package.Id}').AddE('licensed').To(__.V('{license}'))";
                 var v = gremlinClient.SubmitAsync<dynamic>($"g.{command}").Result;
             }
         }
 
-        private static void GetPackage(string name, string version, string frameworkFilter)
+        private static Package GetPackage(string name, string version, string frameworkFilter)
         {
             _log.LogInformation($"Get Package: {name}:{version}");
 
@@ -105,15 +106,19 @@ namespace DependencyGraph
 
                 var properties = xml.GetElementsByTagName("m:properties");
 
-                var packageName = xml.GetElementsByTagName("d:Id")[0].InnerText;
+                var package = new Package
+                {
 
-                var packageVersion = xml.GetElementsByTagName("d:Version")[0].InnerText;
+                    Name = xml.GetElementsByTagName("d:Id")[0].InnerText,
 
-                var packageLicense = xml.GetElementsByTagName("d:LicenseUrl")[0].InnerText;
+                    Version = xml.GetElementsByTagName("d:Version")[0].InnerText,
+                    LicenseUrl = xml.GetElementsByTagName("d:LicenseUrl")[0].InnerText,
+                    DownloadUrl = (xml.GetElementsByTagName("content")[0]).Attributes["src"].InnerText
+                };
 
-                var packageUrl = (xml.GetElementsByTagName("content")[0]).Attributes["src"].InnerText;
+                package.Id = $"{package.Name}:{package.Version}";
 
-                StorePackage(packageName, packageVersion, packageLicense, packageUrl);
+                StorePackage(package);
 
                 var depends = xml.GetElementsByTagName("d:Dependencies")[0].InnerText;
 
@@ -133,15 +138,17 @@ namespace DependencyGraph
 
                             if (!string.IsNullOrEmpty(namePart))
                             {
+                                versionPart = Regex.Match(versionPart, "[^[,]+").Groups[0].Value;
                                 _log.LogInformation($"Getting Dependent {namePart}:{versionPart}");
 
                                 GetPackage(namePart, versionPart, frameworkFilter);
-                                DependsOn($"{packageName}:{packageVersion}", $"{namePart}:{versionPart}", frameworkPart);
+                                DependsOn($"{package.Id}", $"{namePart}:{versionPart}", frameworkPart);
                             }
                         }
                     }
                 }
 
+                return package;
             }
         }
 
@@ -158,32 +165,60 @@ namespace DependencyGraph
             }
         }
 
-        private static void StorePackage(string packageName, string packageVersion, string packageLicense, string packageUrl)
+        private static void StorePackage(Package package)
         {
-            _log.LogInformation($"Store Package: {packageName}:{packageVersion}");
+            _log.LogInformation($"Store Package: {package.Id}");
 
             using (var gremlinClient = GraphConnection())
             {
                 var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
 
-                var check = g.V().Has("package", "id", $"{packageName}:{packageVersion}");
+                var check = g.V().Has("package", "id", $"{package.Id}");
 
                 var v = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{check.ToGremlinQuery()}").Result;
 
                 if (v == null)
                 {
-                    _log.LogInformation("Package Exists");
+                    _log.LogInformation("Create Package");
                     var command = g.AddV("package")
-                        .Property("id", $"{packageName}:{packageVersion}")
-                        .Property("Name", packageName)
-                        .Property("Version", packageVersion)
-                        .Property("LicenseUrl", packageLicense)
-                        .Property("DownloadUrl", packageUrl);
+                        .Property("id", $"{package.Id}")
+                        .Property("Name", package.Name)
+                        .Property("Version", package.Version)
+                        .Property("LicenseUrl", package.LicenseUrl)
+                        .Property("DownloadUrl", package.DownloadUrl);
 
                     v = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
+
                 }
 
+                StoreLicense(package);
+
                 _log.LogInformation("Store Done");
+
+            }
+        }
+
+        private static void StoreLicense(Package package)
+        {
+            _log.LogInformation($"Store license: {package.Id} : {package.LicenseUrl}");
+
+            using (var gremlinClient = GraphConnection())
+            {
+                var g = Traversal().WithRemote(new DriverRemoteConnection(gremlinClient));
+                var check = g.V().Has("license", "Name", $"{package.LicenseUrl}");
+                var w = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{check.ToGremlinQuery()}").Result;
+
+                if (w == null)
+                {
+                    var command = g.AddV("license").Property("Name", package.LicenseUrl);
+
+                    w = gremlinClient.SubmitWithSingleResultAsync<dynamic>($"g.{command.ToGremlinQuery()}").Result;
+
+                }
+
+                _log.LogInformation($"Adding Edge from {package.Id} to {w["id"]}");
+
+                gremlinClient.SubmitAsync($"g.V('{package.Id}').AddE('license').To(__.V('{w["id"]}'))").Wait();
 
             }
         }

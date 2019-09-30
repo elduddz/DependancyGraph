@@ -12,7 +12,7 @@ namespace DependencyGraph
         public string Name { get; set; }
         public string Version { get; set; }
         public string LicenseUrl { get; set; }
-        public string PackageUrl { get; set; }
+        public string DownloadUrl { get; internal set; }
 
         public override string ToString()
         {
